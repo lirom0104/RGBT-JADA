@@ -1,17 +1,8 @@
 # JADA
 
-JADA is a joint RGB--thermal scene reconstruction system based on 3D Gaussian Splatting. This repository is developed from the OMMG branch of [Thermal Gaussian](https://github.com/chen-hangyu/Thermal-Gaussian-main) and includes the code required for training, rendering, and evaluating both RGB and thermal outputs.
-
 ## Installation
 
-The released configuration has been tested with:
-
-- Ubuntu 22.04
-- NVIDIA GeForce RTX 5090
-- GCC/G++ 11.4
-- Python 3.10
-- PyTorch 2.10.0
-- CUDA 12.8
+The provided environment uses Python 3.10, PyTorch 2.10.0, and CUDA 12.8. An NVIDIA GPU with a compatible driver is required.
 
 Create and activate the Conda environment:
 
@@ -27,24 +18,6 @@ python -m pip install --no-build-isolation ./submodules/simple-knn
 python -m pip install --no-build-isolation ./submodules/diff-gaussian-rasterization
 ```
 
-PyTorch normally detects the compute capability of the visible GPU automatically. If the extensions must be compiled without a visible GPU, set `TORCH_CUDA_ARCH_LIST` explicitly to the target GPU's compute capability.
-
-If compilation selects an incompatible Conda compiler or inherits conflicting build flags, retry with the system compiler:
-
-```bash
-env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS \
-    -u NVCC_PREPEND_FLAGS -u NVCC_APPEND_FLAGS \
-    CC=/usr/bin/gcc CXX=/usr/bin/g++ \
-    python -m pip install --no-build-isolation ./submodules/simple-knn
-
-env -u CFLAGS -u CXXFLAGS -u CPPFLAGS -u LDFLAGS \
-    -u NVCC_PREPEND_FLAGS -u NVCC_APPEND_FLAGS \
-    CC=/usr/bin/gcc CXX=/usr/bin/g++ \
-    python -m pip install --no-build-isolation ./submodules/diff-gaussian-rasterization
-```
-
-For the tested RTX 5090 configuration, `TORCH_CUDA_ARCH_LIST=12.0` can be added before `python` when an explicit architecture is required.
-
 Verify the installation:
 
 ```bash
@@ -54,7 +27,52 @@ python train.py --help
 
 The first LPIPS use may download pretrained VGG and LPIPS weights to the PyTorch cache.
 
-## Dataset layout
+## Run the included example
+
+The repository includes a ready-to-use RGB--thermal scene in `example_scene/`. Its training and test views have already been split, and the COLMAP reconstruction is provided in `example_scene/sparse/0/`.
+
+### Training
+
+Train the example scene for the default 30,000 iterations:
+
+```bash
+python train.py \
+    -s example_scene \
+    -m output/example_scene
+```
+
+The trained Gaussian model and configuration will be saved under `output/example_scene/`.
+
+### Rendering
+
+Render the test views from the saved 30,000-iteration model:
+
+```bash
+python render.py \
+    -m output/example_scene \
+    --iteration 30000 \
+    --skip_train
+```
+
+Omit `--iteration 30000` to load the latest saved iteration automatically. Remove `--skip_train` to render both the training and test views.
+
+### Evaluation
+
+Compute PSNR, SSIM, and LPIPS for both RGB and thermal test images:
+
+```bash
+python metrics.py -m output/example_scene
+```
+
+Compute the thermal boundary F-score and hot-region IoU:
+
+```bash
+python extra_metrics.py -m output/example_scene
+```
+
+The aggregate metrics are written to `output/example_scene/results.json`. Per-view metrics are written to `per_view.json` and `per_view_extra_metrics.json`.
+
+## Use your own scene
 
 JADA expects a preprocessed COLMAP scene with paired RGB and thermal images:
 
@@ -74,11 +92,7 @@ SceneName/
 
 Text-form COLMAP files are also supported. RGB and thermal images within each split should have matching filenames. The loader first matches exact basenames, then normalized stems, and finally sorted indices as a fallback.
 
-Datasets and pretrained models are not included in this repository.
-
-## Training
-
-Train one scene for the default 30,000 iterations:
+Train a custom scene with:
 
 ```bash
 python train.py \
@@ -95,54 +109,22 @@ Frequently used options include:
 - `--start_checkpoint`: path to a checkpoint from which training is resumed.
 - `--port`: network GUI port; the default is `6009`.
 
-The main JADA components are enabled by default in `arguments/__init__.py`, including paired-view sampling, Gaussian binding, thermal residual geometry, render calibration, dual-modal refinement, adaptive branch weighting, joint anchor lifecycle management, and EMA export.
-
-## Rendering
-
-Render both the training and test views from the latest saved iteration:
+Render and evaluate the custom scene with:
 
 ```bash
-python render.py -m output/SceneName
-```
-
-Render only the test split or select a specific iteration:
-
-```bash
-python render.py -m output/SceneName --skip_train
 python render.py -m output/SceneName --iteration 30000 --skip_train
-```
-
-`render.py` reads the training configuration from `output/SceneName/cfg_args`.
-
-## Evaluation
-
-Compute PSNR, SSIM, and LPIPS for the rendered RGB and thermal test images:
-
-```bash
 python metrics.py -m output/SceneName
-```
-
-Multiple scenes can be evaluated together:
-
-```bash
-python metrics.py -m output/SceneA output/SceneB
-```
-
-The aggregate and per-view results are written to `results.json` and `per_view.json` in each model directory.
-
-Compute the thermal boundary F-score and hot-region IoU from rendered and ground-truth thermal images:
-
-```bash
 python extra_metrics.py -m output/SceneName
 ```
 
-Multiple scenes can be evaluated in one invocation:
+`render.py` reads the training configuration from `output/SceneName/cfg_args`. Multiple scenes can be evaluated in one command:
 
 ```bash
+python metrics.py -m output/SceneA output/SceneB
 python extra_metrics.py -m output/SceneA output/SceneB
 ```
 
-`extra_metrics.py` appends `thermal_Boundary_Fscore` and `hot_region_IoU` to each scene's `results.json`. Per-view values are written to `per_view_extra_metrics.json`. By default, thermal edges and hot regions are selected at the 90th percentile. Boundary matching allows a one-pixel tolerance.
+## Temperature evaluation
 
 For ThermoScenes outputs, compute temperature MAE and ROI MAE across all scenes with:
 
