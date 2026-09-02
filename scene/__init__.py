@@ -129,6 +129,7 @@ class Scene:
             self.gaussians.load_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
             self.gaussians.load_feature_modules(point_cloud_path)
             self.gaussians.load_cmo_states(point_cloud_path)
+            self.gaussians.constrain_thermal_scaling(self.cameras_extent)
         else:
             init_cameras = []
             for resolution_scale in resolution_scales:
@@ -148,6 +149,7 @@ class Scene:
                 self.cameras_extent,
                 init_cameras=init_cameras,
             )
+            self.gaussians.constrain_thermal_scaling(self.cameras_extent)
         
 
     def save(self, iteration):

@@ -173,7 +173,6 @@ def _named_ema_sources(gaussians):
         "_scaling",
         "_rotation",
         "_opacity_base",
-        "_at_gom_opacity_bias_rgb",
         "_at_gom_opacity_bias_th",
         "_at_gom_center_residual",
         "_at_gom_log_scale_residual",
@@ -774,6 +773,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
+                gaussians.constrain_thermal_scaling(scene.cameras_extent)
                 gaussians.optimizer.zero_grad(set_to_none = True)
                 if (
                     getattr(opt, "use_ema_export", False)

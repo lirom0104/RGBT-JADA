@@ -228,7 +228,7 @@ class GaussianModel:
 
     def capture(self):
         return {
-            "version": 4,
+            "version": 5,
             "active_sh_degree": self.active_sh_degree,
             "xyz": self._xyz,
             "features_dc": self._features_dc,
@@ -378,6 +378,11 @@ class GaussianModel:
             )
             cmo_states = model_args.get("cmo_states")
 
+        # Version 4 and older learned an RGB-specific opacity offset.  Fold that
+        # offset into the canonical opacity logit and compensate the thermal
+        # offset, preserving both rendered opacities while enforcing alpha_r=alpha.
+        self._canonicalize_rgb_opacity()
+
         self._configure_bgfc_module()
         self._configure_color_refinement_module()
         self._refresh_optional_parameter_grad_flags()
@@ -398,10 +403,56 @@ class GaussianModel:
         try:
             self.optimizer.load_state_dict(opt_dict)
         except ValueError:
+            legacy_groups = opt_dict.get("param_groups", []) if isinstance(opt_dict, dict) else []
+            filtered_groups = [
+                group for group in legacy_groups
+                if group.get("name") != "at_gom_opacity_bias_rgb"
+            ]
+            if len(filtered_groups) == len(self.optimizer.param_groups) and len(filtered_groups) != len(legacy_groups):
+                retained_ids = {
+                    parameter_id
+                    for group in filtered_groups
+                    for parameter_id in group.get("params", [])
+                }
+                migrated_state = {
+                    "state": {
+                        parameter_id: state
+                        for parameter_id, state in opt_dict.get("state", {}).items()
+                        if parameter_id in retained_ids
+                    },
+                    "param_groups": filtered_groups,
+                }
+                try:
+                    self.optimizer.load_state_dict(migrated_state)
+                    print("[Warning] Migrated optimizer state from the legacy RGB-opacity-bias layout.")
+                    return
+                except ValueError:
+                    pass
             print("[Warning] Optimizer state is incompatible with the refactored GaussianModel and was reinitialized.")
 
     def _make_zero_parameter_like(self, reference):
         return nn.Parameter(torch.zeros_like(reference).requires_grad_(True))
+
+    def _canonicalize_rgb_opacity(self):
+        if self._opacity_base.numel() == 0:
+            return
+
+        rgb_bias = self._at_gom_opacity_bias_rgb.detach()
+        base_requires_grad = bool(getattr(self._opacity_base, "requires_grad", True))
+        thermal_requires_grad = bool(getattr(self._at_gom_opacity_bias_th, "requires_grad", True))
+        self._opacity_base = nn.Parameter(
+            (self._opacity_base.detach() + rgb_bias).clone(),
+            requires_grad=base_requires_grad,
+        )
+        self._at_gom_opacity_bias_th = nn.Parameter(
+            (self._at_gom_opacity_bias_th.detach() - rgb_bias).clone(),
+            requires_grad=thermal_requires_grad,
+        )
+        # Kept as a zero-valued compatibility field for old checkpoints/PLYs.
+        self._at_gom_opacity_bias_rgb = nn.Parameter(
+            torch.zeros_like(self._opacity_base),
+            requires_grad=False,
+        )
 
     def _make_render_calibration_parameter(self, value):
         return nn.Parameter(
@@ -675,12 +726,12 @@ class GaussianModel:
         target.mul_(ema).add_(observed_values * (1.0 - ema))
 
     def _refresh_optional_parameter_grad_flags(self):
-        bias_requires_grad = self.use_at_gom
         delta_requires_grad = self.use_at_gom
         if isinstance(self._at_gom_opacity_bias_rgb, nn.Parameter):
-            self._at_gom_opacity_bias_rgb.requires_grad_(bias_requires_grad)
+            # RGB always uses the canonical opacity alpha_i^r = alpha_i.
+            self._at_gom_opacity_bias_rgb.requires_grad_(False)
         if isinstance(self._at_gom_opacity_bias_th, nn.Parameter):
-            self._at_gom_opacity_bias_th.requires_grad_(bias_requires_grad)
+            self._at_gom_opacity_bias_th.requires_grad_(self.use_at_gom)
         if isinstance(self._at_gom_center_residual, nn.Parameter):
             self._at_gom_center_residual.requires_grad_(delta_requires_grad)
         if isinstance(self._at_gom_log_scale_residual, nn.Parameter):
@@ -791,7 +842,7 @@ class GaussianModel:
     
     @property
     def get_rgb_opacity(self):
-        return self.opacity_activation(self._opacity_base + self._at_gom_opacity_bias_rgb)
+        return self.get_opacity_base
 
     @property
     def get_thermal_opacity(self):
@@ -812,6 +863,19 @@ class GaussianModel:
         if not self.use_at_gom:
             return self.get_scaling
         return self.scaling_activation(self._scaling + self._at_gom_log_scale_residual)
+
+    def constrain_thermal_scaling(self, scene_extent, max_extent_ratio=0.6):
+        """Bound AT-GOM thermal scales without deleting any Gaussian anchors."""
+        if not self.use_at_gom or self._at_gom_log_scale_residual.numel() == 0:
+            return
+
+        max_scale = max(float(scene_extent) * float(max_extent_ratio), 1e-6)
+        max_log_scale = self._scaling.new_tensor(max_scale).log()
+        with torch.no_grad():
+            max_residual = max_log_scale - self._scaling
+            self._at_gom_log_scale_residual.copy_(
+                torch.minimum(self._at_gom_log_scale_residual, max_residual)
+            )
 
     def get_covariance(self, scaling_modifier = 1, scaling = None, rotation = None):
         scaling = self.get_scaling if scaling is None else scaling
@@ -1611,7 +1675,7 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity_base = nn.Parameter(opacities.requires_grad_(True))
-        self._at_gom_opacity_bias_rgb = nn.Parameter(torch.zeros_like(opacities).requires_grad_(True))
+        self._at_gom_opacity_bias_rgb = nn.Parameter(torch.zeros_like(opacities), requires_grad=False)
         self._at_gom_opacity_bias_th = nn.Parameter(torch.zeros_like(opacities).requires_grad_(True))
         self._at_gom_center_residual = nn.Parameter(torch.zeros_like(fused_point_cloud).requires_grad_(True))
         self._at_gom_log_scale_residual = nn.Parameter(torch.zeros_like(scales).requires_grad_(True))
@@ -1728,7 +1792,6 @@ class GaussianModel:
             {'params': [self._thermal_dc], 'lr': training_args.thermal_feature_lr, "name": "thermal_dc", "per_anchor": True},
             {'params': [self._thermal_rest], 'lr': training_args.thermal_feature_lr / 20.0, "name": "t_rest", "per_anchor": True},
             {'params': [self._opacity_base], 'lr': training_args.opacity_lr, "name": "opacity_base", "per_anchor": True},
-            {'params': [self._at_gom_opacity_bias_rgb], 'lr': training_args.opacity_lr, "name": "at_gom_opacity_bias_rgb", "per_anchor": True},
             {'params': [self._at_gom_opacity_bias_th], 'lr': training_args.opacity_lr, "name": "at_gom_opacity_bias_th", "per_anchor": True},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling", "per_anchor": True},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation", "per_anchor": True},
@@ -1995,6 +2058,7 @@ class GaussianModel:
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
         self._at_gom_center_residual = nn.Parameter(torch.tensor(at_gom_center_residual, dtype=torch.float, device="cuda").requires_grad_(True))
         self._at_gom_log_scale_residual = nn.Parameter(torch.tensor(at_gom_log_scale_residual, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._canonicalize_rgb_opacity()
         self._refresh_optional_parameter_grad_flags()
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self.cmo_lifecycle_state = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -2359,10 +2423,8 @@ class GaussianModel:
         cmo_post_scores = self.get_cmo_scores(iteration=iteration)
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         prune_mask = prune_mask & cmo_post_scores["cmo_prune_mask"]
-        if max_screen_size:
-            big_points_vs = self.max_radii2D > max_screen_size
-            big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
-            prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+        # Keep max_screen_size in the public signature for call compatibility,
+        # but size alone must never bypass low opacity and the full CMO gate.
         return prune_mask
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size, iteration=None):
