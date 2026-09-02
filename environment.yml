@@ -1,0 +1,22 @@
+name: JADA
+channels:
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - cuda-nvcc=12.8.93
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.10.0+cu128
+      - torchvision==0.25.0+cu128
+      - numpy==2.2.6
+      - Pillow==12.3.0
+      - plyfile==1.1.3
+      - tqdm==4.67.1
+      - opencv-python==4.13.0.92
+      - pandas==2.3.3
+      - ninja==1.13.2
+      - setuptools==83.0.0
+      - wheel==0.47.0
