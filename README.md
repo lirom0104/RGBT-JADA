@@ -177,7 +177,7 @@ output/SceneName/
 
 ## Acknowledgements
 
-This project builds on [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) and the OMMG branch of [Thermal Gaussian](https://github.com/chen-hangyu/Thermal-Gaussian-main). The vendored `simple-knn`, differentiable Gaussian rasterization, and GLM sources retain their original copyright and license notices.
+This project builds on [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) and [Thermal Gaussian](https://github.com/chen-hangyu/Thermal-Gaussian-main). The vendored `simple-knn`, differentiable Gaussian rasterization, and GLM sources retain their original copyright and license notices.
 
 ## License
 
