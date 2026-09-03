@@ -13,7 +13,7 @@ import os
 import torch
 from random import randint
 from torchvision.utils import save_image
-from utils.loss_utils import charbonnier_loss, edge_aware_tv_loss, l1_loss, ssim
+from utils.loss_utils import build_reconstruction_criterion, edge_aware_tv_loss, l1_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
@@ -270,7 +270,11 @@ def _restore_ema_export_backup(backup, gaussians):
 
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
-    tb_writer = prepare_output_and_logger(dataset)
+    tb_writer = prepare_output_and_logger(dataset, opt)
+    reconstruction_criterion = build_reconstruction_criterion(
+        name=getattr(opt, "reconstruction_loss", "charbonnier"),
+        charbonnier_eps=getattr(opt, "charbonnier_eps", 1e-3),
+    )
     gaussians = GaussianModel(
         dataset.sh_degree,
         use_bgfc=getattr(dataset, "use_bgfc", False),
@@ -407,10 +411,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_thermal = viewpoint_cam.original_thermal.cuda()
         
         Ll1 = l1_loss(image, gt_image)
-        rgb_charbonnier = charbonnier_loss(image, gt_image)
+        rgb_data_term = reconstruction_criterion(image, gt_image)
         ssim_rgb_loss = 1.0 - ssim(image, gt_image)
         Ll1_thermal = l1_loss(thermal, gt_thermal)
-        thermal_charbonnier = charbonnier_loss(thermal, gt_thermal)
+        thermal_data_term = reconstruction_criterion(thermal, gt_thermal)
         ssim_thermal_loss = 1.0 - ssim(thermal, gt_thermal)
         smoothloss_thermal = edge_aware_tv_loss(
             thermal,
@@ -429,8 +433,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         else:
             lpips_thermal = Ll1.new_zeros(())
 
-        recon_rgb = (1.0 - opt.lambda_dssim) * rgb_charbonnier + opt.lambda_dssim * ssim_rgb_loss + 0.01 * lpips_rgb
-        recon_thermal = (1.0 - opt.lambda_dssim) * thermal_charbonnier + opt.lambda_dssim * ssim_thermal_loss + 0.01 * lpips_thermal
+        recon_rgb = (1.0 - opt.lambda_dssim) * rgb_data_term + opt.lambda_dssim * ssim_rgb_loss + 0.01 * lpips_rgb
+        recon_thermal = (1.0 - opt.lambda_dssim) * thermal_data_term + opt.lambda_dssim * ssim_thermal_loss + 0.01 * lpips_thermal
 
         w_rgb, w_thermal, adaptive_weight_metrics = _compute_adaptive_branch_weights(
             iteration=iteration,
@@ -793,7 +797,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     scene.model_path + "/chkpnt" + str(iteration) + ".pth",
                 )
 
-def prepare_output_and_logger(args):    
+def prepare_output_and_logger(args, optimization_args=None):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
@@ -806,6 +810,9 @@ def prepare_output_and_logger(args):
     os.makedirs(args.model_path, exist_ok = True)
     with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
         cfg_log_f.write(str(Namespace(**vars(args))))
+    if optimization_args is not None:
+        with open(os.path.join(args.model_path, "optimization_args"), 'w') as opt_log_f:
+            opt_log_f.write(str(Namespace(**vars(optimization_args))))
 
     # Create Tensorboard writer
     tb_writer = None

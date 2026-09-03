@@ -16,6 +16,7 @@ from math import exp
 import numpy as np
 import cv2
 import torch.nn as nn
+from functools import partial
 
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
@@ -26,6 +27,20 @@ def l2_loss(network_output, gt):
 def charbonnier_loss(network_output, gt, eps=1e-3):
     diff = network_output - gt
     return torch.sqrt(diff * diff + eps * eps).mean()
+
+def build_reconstruction_criterion(name="charbonnier", charbonnier_eps=1e-3):
+    criteria = {
+        "l1": l1_loss,
+        "charbonnier": partial(charbonnier_loss, eps=float(charbonnier_eps)),
+    }
+    normalized_name = str(name).strip().lower()
+    try:
+        return criteria[normalized_name]
+    except KeyError as exc:
+        supported = ", ".join(sorted(criteria))
+        raise ValueError(
+            f"Unsupported reconstruction loss '{name}'. Expected one of: {supported}."
+        ) from exc
 
 def image_gradients(image):
     grad_x = image[..., :, 1:] - image[..., :, :-1]
