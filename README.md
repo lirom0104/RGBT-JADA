@@ -100,6 +100,21 @@ python train.py \
     -m output/SceneName
 ```
 
+Camera calibration is enabled by default for COLMAP scenes. It uses the supplied
+camera intrinsics for off-center principal points and lens distortion, and
+supports PINHOLE, SIMPLE_PINHOLE, OPENCV, SIMPLE_RADIAL, and RADIAL models.
+Use `--no-use_camera_calibration` to disable it. `render.py` reads the saved
+setting from `cfg_args` and applies the same projection correction at evaluation
+time. Scenes without COLMAP camera metadata keep their existing projection.
+
+To run both code versions on both datasets concurrently, with one method per
+GPU, use `./run_two_methods_two_gpus.sh`. GPU 0 runs this checkout and GPU 1
+runs `Our_Project-New-2-source-before-cleanup-20260926_163758`; both use camera
+calibration and CWGC is disabled. Results are written under each method's own
+`output/` directory by default; use `NEW1_OUTPUT_ROOT` and `NEW2_OUTPUT_ROOT`
+to choose custom locations, or pass `--dry-run` to inspect commands without
+training.
+
 Frequently used options include:
 
 - `--iterations`: total training iterations.

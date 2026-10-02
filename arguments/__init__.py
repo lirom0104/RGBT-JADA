@@ -57,6 +57,7 @@ class ModelParams(ParamGroup):
         self.use_bgfc = True
         self.use_at_gom = True
         self.use_paired_views = True
+        self.use_camera_calibration = True
         self.bgfc_hidden_dim = 32
         self.bgfc_gate_init_bias = -2.2
         self.bgfc_thermal_grayscale_context = True

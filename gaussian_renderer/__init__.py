@@ -14,6 +14,7 @@ import math
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
+from utils.camera_calibration import warp_raster_to_sensor
 
 def _resolve_head_appearance(render_params, viewpoint_camera, pc, pipe, override_precomp):
     if override_precomp is not None:
@@ -90,18 +91,19 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         pass
 
     # Set up rasterization configuration
-    tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
-    tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
+    raster_camera = getattr(viewpoint_camera, "raster_camera", viewpoint_camera)
+    tanfovx = math.tan(raster_camera.FoVx * 0.5)
+    tanfovy = math.tan(raster_camera.FoVy * 0.5)
 
     raster_settings = GaussianRasterizationSettings(
-        image_height=int(viewpoint_camera.image_height),
-        image_width=int(viewpoint_camera.image_width),
+        image_height=int(raster_camera.image_height),
+        image_width=int(raster_camera.image_width),
         tanfovx=tanfovx,
         tanfovy=tanfovy,
         bg=bg_color,
         scale_modifier=scaling_modifier,
-        viewmatrix=viewpoint_camera.world_view_transform,
-        projmatrix=viewpoint_camera.full_proj_transform,
+        viewmatrix=raster_camera.world_view_transform,
+        projmatrix=raster_camera.full_proj_transform,
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
@@ -153,8 +155,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         pipe=pipe,
         override_precomp=override_thermal,
     )
-    rendered_color = pc.apply_render_calibration(rgb_head["rendered_color"], "color")
-    rendered_thermal = pc.apply_render_calibration(thermal_head["rendered_thermal"], "thermal")
+    rendered_color = pc.apply_render_calibration(
+        warp_raster_to_sensor(rgb_head["rendered_color"], viewpoint_camera), "color"
+    )
+    rendered_thermal = pc.apply_render_calibration(
+        warp_raster_to_sensor(thermal_head["rendered_thermal"], viewpoint_camera), "thermal"
+    )
     rendered_color, rendered_thermal = pc.apply_multimodal_refinement(rendered_color, rendered_thermal)
 
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.

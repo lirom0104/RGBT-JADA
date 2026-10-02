@@ -1566,10 +1566,17 @@ class GaussianModel:
                 torch.zeros_like(positive_depth),
             )
 
-        focal_x = float(fov2focal(float(camera.FoVx), width))
-        focal_y = float(fov2focal(float(camera.FoVy), height))
-        pixel_x = focal_x * (camera_points[:, 0] / depth.clamp_min(1e-6)) + (width * 0.5)
-        pixel_y = focal_y * (camera_points[:, 1] / depth.clamp_min(1e-6)) + (height * 0.5)
+        if hasattr(camera, "calibration_intrinsics"):
+            from utils.camera_calibration import project_sensor_pixels
+            sensor_pixels = project_sensor_pixels(
+                camera_points, camera.calibration_intrinsics, camera.calibration_distortion
+            )
+            pixel_x, pixel_y = sensor_pixels.unbind(-1)
+        else:
+            focal_x = float(fov2focal(float(camera.FoVx), width))
+            focal_y = float(fov2focal(float(camera.FoVy), height))
+            pixel_x = focal_x * (camera_points[:, 0] / depth.clamp_min(1e-6)) + (width * 0.5)
+            pixel_y = focal_y * (camera_points[:, 1] / depth.clamp_min(1e-6)) + (height * 0.5)
 
         valid = (
             positive_depth

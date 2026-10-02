@@ -16,7 +16,7 @@ from utils.graphics_utils import fov2focal
 
 WARNED = False
 
-def loadCam(args, id, cam_info, resolution_scale):
+def loadCam(args, id, cam_info, resolution_scale, calibration_cache=None):
     orig_w, orig_h = cam_info.image.size
 
     if args.resolution in [1, 2, 4, 8]:
@@ -60,14 +60,18 @@ def loadCam(args, id, cam_info, resolution_scale):
     camera.pair_strategy = getattr(cam_info, "pair_strategy", "camera_bundle")
     camera.pair_fallback_used = getattr(cam_info, "pair_fallback_used", False)
     camera.has_paired_view = getattr(cam_info, "has_paired_view", True)
+    if getattr(args, "use_camera_calibration", False) and getattr(cam_info, "camera_model", ""):
+        from utils.camera_calibration import attach_calibration
+        attach_calibration(camera, cam_info, calibration_cache)
     return camera
 
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []
+    calibration_cache = {}
 
     for id, c in enumerate(cam_infos):
-        camera_list.append(loadCam(args, id, c, resolution_scale))
+        camera_list.append(loadCam(args, id, c, resolution_scale, calibration_cache))
 
     return camera_list
 

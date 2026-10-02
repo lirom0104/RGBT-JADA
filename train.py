@@ -400,7 +400,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         rgb_viewspace_point_tensor = render_pkg["rgb_viewspace_points"]
         rgb_visibility_filter = render_pkg["rgb_visibility_filter"]
         rgb_radii = render_pkg["rgb_radii"]
-        thermal_viewspace_point_tensor = render_pkg["thermal_viewspace_points"]
         thermal_visibility_filter = render_pkg["thermal_visibility_filter"]
         thermal_radii = render_pkg["thermal_radii"]
 
@@ -741,11 +740,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     gaussians.max_radii2D[rgb_visibility_filter],
                     rgb_radii[rgb_visibility_filter],
                 )
-                gaussians.add_cmo_densification_stats(
-                    rgb_viewspace_point_tensor=rgb_viewspace_point_tensor,
-                    rgb_update_filter=rgb_visibility_filter,
-                    thermal_viewspace_point_tensor=thermal_viewspace_point_tensor,
-                    thermal_update_filter=thermal_visibility_filter,
+                gaussians.add_densification_stats(
+                    rgb_viewspace_point_tensor,
+                    rgb_visibility_filter,
                 )
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:

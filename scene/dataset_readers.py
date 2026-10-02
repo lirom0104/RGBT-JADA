@@ -40,6 +40,8 @@ class CameraInfo(NamedTuple):
     pair_strategy: str = "exact_basename"
     pair_fallback_used: bool = False
     has_paired_view: bool = True
+    camera_model: str = ""
+    camera_params: tuple = ()
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -158,7 +160,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, thermal_fol
                                 image_path=image_path, image_name=image_name, width=width, height=height,
                                 thermal=thermal, thermal_path=thermal_path,
                                 pair_key=pair_key, pair_strategy=pair_strategy,
-                                pair_fallback_used=pair_fallback_used, has_paired_view=True)
+                                pair_fallback_used=pair_fallback_used, has_paired_view=True,
+                                camera_model=intr.model, camera_params=tuple(intr.params))
             cam_infos.append(cam_info)
         elif os.path.exists(image_path):
             print(
